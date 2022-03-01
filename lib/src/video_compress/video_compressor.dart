@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import '../progress_callback/compress_mixin.dart';
-import '../video_compress/video_quality.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../media/media_info.dart';
+import '../progress_callback/compress_mixin.dart';
+import '../video_compress/video_quality.dart';
 
 abstract class IVideoCompress extends CompressMixin {}
 
@@ -126,6 +128,7 @@ extension Compress on IVideoCompress {
     int? duration,
     bool? includeAudio,
     int frameRate = 30,
+    bool partialCompression = false,
   }) async {
     if (isCompressing) {
       throw StateError('''VideoCompress Error: 
@@ -147,6 +150,7 @@ extension Compress on IVideoCompress {
       'duration': duration,
       'includeAudio': includeAudio,
       'frameRate': frameRate,
+      'partialCompression': partialCompression,
     });
 
     // ignore: invalid_use_of_protected_member
