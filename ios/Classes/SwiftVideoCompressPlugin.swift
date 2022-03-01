@@ -207,7 +207,7 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         exporter.shouldOptimizeForNetworkUse = true
         exporter.timeRange = timeRange
         
-        if !partialCompression {
+        if !(partialCompression ?? false) {
             if frameRate != nil {
                 let videoComposition = AVMutableVideoComposition(propertiesOf: sourceVideoAsset)
                 videoComposition.frameDuration = CMTimeMake(value: 1, timescale: Int32(frameRate!))
