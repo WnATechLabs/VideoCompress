@@ -42,8 +42,9 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             let duration = args!["duration"] as? Double
             let includeAudio = args!["includeAudio"] as? Bool
             let frameRate = args!["frameRate"] as? Int
+            let partialCompression = args!["partialCompression"] as? Bool
             compressVideo(path, quality, deleteOrigin, startTime, duration, includeAudio,
-                          frameRate, result)
+                          frameRate, partialCompression, result)
         case "cancelCompression":
             cancelCompression(result)
         case "deleteAllCache":
@@ -122,7 +123,7 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             "duration":duration,
             "filesize":filesize,
             "orientation":orientation
-            ] as [String : Any?]
+        ] as [String : Any?]
         return dictionary
     }
     
@@ -143,7 +144,7 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
     private func getExportPreset(_ quality: NSNumber)->String {
         switch(quality) {
         case 1:
-            return AVAssetExportPresetLowQuality    
+            return AVAssetExportPresetLowQuality
         case 2:
             return AVAssetExportPresetMediumQuality
         case 3:
@@ -171,12 +172,12 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             return sourceVideoTrack.asset!
         }
         
-        return composition    
+        return composition
     }
     
-    private func compressVideo(_ path: String,_ quality: NSNumber,_ deleteOrigin: Bool,_ startTime: Double?,
-                               _ duration: Double?,_ includeAudio: Bool?,_ frameRate: Int?,
-                               _ result: @escaping FlutterResult) {
+    private func compressVideo(_ path: String, _ quality: NSNumber, _ deleteOrigin: Bool, _ startTime: Double?,
+    _ duration: Double?, _ includeAudio: Bool?, _ frameRate: Int?,
+    _ partialCompression Bool, _ result: @escaping FlutterResult) {
         let sourceVideoUrl = Utility.getPathUrl(path)
         let sourceVideoType = "mp4"
         
@@ -184,16 +185,14 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         let sourceVideoTrack = avController.getTrack(sourceVideoAsset)
         
         let compressionUrl =
-            Utility.getPathUrl("\(Utility.basePath())/\(Utility.getFileName(path)).\(sourceVideoType)")
+        Utility.getPathUrl("\(Utility.basePath())/\(Utility.getFileName(path)).\(sourceVideoType)")
         
         let timescale = sourceVideoAsset.duration.timescale
-        let minStartTime = Double(startTime ?? 0)
         
         let videoDuration = sourceVideoAsset.duration.seconds
-        let minDuration = Double(duration ?? videoDuration)
-        let maxDurationTime = minStartTime + minDuration < videoDuration ? minDuration : videoDuration
+        let maxDurationTime = (duration ?? videoDuration < videoDuration ? duration : videoDuration) ?? videoDuration
         
-        let cmStartTime = CMTimeMakeWithSeconds(minStartTime, preferredTimescale: timescale)
+        let cmStartTime = CMTimeMakeWithSeconds(0, preferredTimescale: timescale)
         let cmDurationTime = CMTimeMakeWithSeconds(maxDurationTime, preferredTimescale: timescale)
         let timeRange: CMTimeRange = CMTimeRangeMake(start: cmStartTime, duration: cmDurationTime)
         
@@ -206,16 +205,20 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         exporter.outputURL = compressionUrl
         exporter.outputFileType = AVFileType.mp4
         exporter.shouldOptimizeForNetworkUse = true
+        exporter.timeRange = timeRange
         
-        if frameRate != nil {
-            let videoComposition = AVMutableVideoComposition(propertiesOf: sourceVideoAsset)
-            videoComposition.frameDuration = CMTimeMake(value: 1, timescale: Int32(frameRate!))
-            exporter.videoComposition = videoComposition
+        if !partialCompression {
+            if frameRate != nil {
+                let videoComposition = AVMutableVideoComposition(propertiesOf: sourceVideoAsset)
+                videoComposition.frameDuration = CMTimeMake(value: 1, timescale: Int32(frameRate!))
+                exporter.videoComposition = videoComposition
+            }
         }
         
         if !isIncludeAudio {
             exporter.timeRange = timeRange
         }
+        
         
         Utility.deleteFile(compressionUrl.absoluteString)
         
@@ -224,7 +227,7 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         
         exporter.exportAsynchronously(completionHandler: {
             timer.invalidate()
-            if(self.stopCommand) {
+            if (self.stopCommand) {
                 self.stopCommand = false
                 var json = self.getMediaInfoJson(path)
                 json["isCancel"] = true
@@ -239,12 +242,11 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
                     }
                     self.exporter = nil
                     self.stopCommand = false
-                }
-                catch let error as NSError {
+                } catch let error as NSError {
                     print(error)
                 }
             }
-            var json = self.getMediaInfoJson(Utility.excludeEncoding(compressionUrl.path))
+            var json = self.getMediaInfoJson(compressionUrl.absoluteString)
             json["isCancel"] = false
             let jsonString = Utility.keyValueToJson(json)
             result(jsonString)
