@@ -3,6 +3,7 @@ package com.example.video_compress
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import android.media.MediaMetadataRetriever
 import com.otaliastudios.transcoder.Transcoder
 import com.otaliastudios.transcoder.TranscoderListener
 import com.otaliastudios.transcoder.source.TrimDataSource
@@ -34,7 +35,7 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
     private var _channel: MethodChannel? = null
     private val TAG = "VideoCompressPlugin"
     private val LOG = Logger(TAG)
-    private var transcodeFuture:Future<Void>? = null
+    private var transcodeFuture: Future<Void>? = null
     var channelName = "video_compress"
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -57,8 +58,10 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 val path = call.argument<String>("path")
                 val quality = call.argument<Int>("quality")!!
                 val position = call.argument<Int>("position")!! // to long
-                ThumbnailUtility("video_compress").getFileThumbnail(context, path!!, quality,
-                        position.toLong(), result)
+                ThumbnailUtility("video_compress").getFileThumbnail(
+                    context, path!!, quality,
+                    position.toLong(), result
+                )
             }
             "getMediaInfo" -> {
                 val path = call.argument<String>("path")
@@ -83,7 +86,7 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 val startTime = call.argument<Int>("startTime")
                 val duration = call.argument<Int>("duration")
                 val includeAudio = call.argument<Boolean>("includeAudio") ?: true
-                val frameRate = if (call.argument<Int>("frameRate")==null) 30 else call.argument<Int>("frameRate")
+                val frameRate = if (call.argument<Int>("frameRate") == null) 30 else call.argument<Int>("frameRate")
                 val partialCompression = call.argument<Boolean>("partialCompression") ?: false
 
                 val tempDir: String = context.getExternalFilesDir("video_compress")!!.absolutePath
@@ -96,7 +99,7 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 when (quality) {
 
                     0 -> {
-                      videoTrackStrategy = DefaultVideoStrategy.atMost(720).build()
+                        videoTrackStrategy = DefaultVideoStrategy.atMost(720).build()
                     }
 
                     1 -> {
@@ -109,10 +112,10 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
 
                         assert(value = frameRate != null)
                         videoTrackStrategy = DefaultVideoStrategy.Builder()
-                                .keyFrameInterval(3f)
-                                .bitRate(1280 * 720 * 4.toLong())
-                                .frameRate(frameRate!!) // will be capped to the input frameRate
-                                .build()
+                            .keyFrameInterval(3f)
+                            .bitRate(1280 * 720 * 4.toLong())
+                            .frameRate(frameRate!!) // will be capped to the input frameRate
+                            .build()
                     }
                     4 -> {
                         videoTrackStrategy = DefaultVideoStrategy.atMost(480, 640).build()
@@ -125,7 +128,7 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                     }
                     7 -> {
                         videoTrackStrategy = DefaultVideoStrategy.atMost(1080, 1920).build()
-                    }                    
+                    }
                 }
 
                 audioTrackStrategy = if (includeAudio) {
@@ -140,40 +143,49 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                     RemoveTrackStrategy()
                 }
 
-                val dataSource = if (startTime != null || duration != null){
+                val dataSource = if (startTime != null || duration != null) {
+                    val file = File(path)
+                    val retriever = MediaMetadataRetriever()
+                    retriever.setDataSource(context, Uri.fromFile(file))
+                    val durationFromVideoMetaStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    val durationFromVideoMeta = java.lang.Long.parseLong(durationStr)
+                    val finalStartTime = (((startTime ?: 0) < 0 ? 0 : (startTime ?: 0)) * 1000).toLong()
+                    val finalEndTime = (((duration ?: durationFromVideoMeta) > durationFromVideoMeta ? durationFromVideoMeta : (duration ?: durationFromVideoMeta)) * 1000).toLong()
+
                     val source = UriDataSource(context, Uri.parse(path))
-                    TrimDataSource(source, (1000 * 1000 * (startTime ?: 0)).toLong(), (1000 * 1000 * (duration ?: 0)).toLong())
-                }else{
+                    TrimDataSource(source, finalStartTime, finalEndTime)
+                } else {
                     UriDataSource(context, Uri.parse(path))
                 }
 
 
                 transcodeFuture = Transcoder.into(destPath!!)
-                        .addDataSource(dataSource)
-                        .setAudioTrackStrategy(audioTrackStrategy)
-                        .setVideoTrackStrategy(videoTrackStrategy)
-                        .setListener(object : TranscoderListener {
-                            override fun onTranscodeProgress(progress: Double) {
-                                channel.invokeMethod("updateProgress", progress * 100.00)
-                            }
-                            override fun onTranscodeCompleted(successCode: Int) {
-                                channel.invokeMethod("updateProgress", 100.00)
-                                val json = Utility(channelName).getMediaInfoJson(context, destPath)
-                                json.put("isCancel", false)
-                                result.success(json.toString())
-                                if (deleteOrigin) {
-                                    File(path).delete()
-                                }
-                            }
+                    .addDataSource(dataSource)
+                    .setAudioTrackStrategy(audioTrackStrategy)
+                    .setVideoTrackStrategy(videoTrackStrategy)
+                    .setListener(object : TranscoderListener {
+                        override fun onTranscodeProgress(progress: Double) {
+                            channel.invokeMethod("updateProgress", progress * 100.00)
+                        }
 
-                            override fun onTranscodeCanceled() {
-                                result.success(null)
+                        override fun onTranscodeCompleted(successCode: Int) {
+                            channel.invokeMethod("updateProgress", 100.00)
+                            val json = Utility(channelName).getMediaInfoJson(context, destPath)
+                            json.put("isCancel", false)
+                            result.success(json.toString())
+                            if (deleteOrigin) {
+                                File(path).delete()
                             }
+                        }
 
-                            override fun onTranscodeFailed(exception: Throwable) {
-                                result.success(null)
-                            }
-                        }).transcode()
+                        override fun onTranscodeCanceled() {
+                            result.success(null)
+                        }
+
+                        override fun onTranscodeFailed(exception: Throwable) {
+                            result.success(null)
+                        }
+                    }).transcode()
             }
             else -> {
                 result.notImplemented()
